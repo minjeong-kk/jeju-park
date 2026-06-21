@@ -1,10 +1,8 @@
 # jeju-park
 **Desktop Pet Widget for Windows (.exe)**   
+노트북이나 PC를 사용하는 동안 화면에 존재하며 돌아다니는 데스크톱 펫   
 SSB3aXNoIHlvdSB3ZXJlIGhlcmUh
    
-노트북이나 PC를 사용하는 동안 화면에 존재하며 돌아다니는 데스크톱 펫
-
-<br>
 <br>
 
 ## 1. 주요 기능 및 특징
