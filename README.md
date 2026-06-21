@@ -75,7 +75,31 @@ python main.py
 ```
 build_exe.bat
 ```
-빌드 완료 후 다른 PC로 이동하거나 배포할 때는 dist\DesktopPet 폴더 전체를 같이 옮겨야 정상적으로 실행됩니다.
+빌드 완료 후 다른 PC로 이동하거나 배포할 때는 dist\DesktopPet 폴더 전체를 같이 옮겨야 정상적으로 실행됩니다.   
+
+<br>
+
+```
+pyinstaller --onedir --windowed --noconfirm ^
+  --name DesktopPet ^
+  --add-data "assets;assets" ^
+  --exclude-module PySide6.QtWebEngineWidgets ^
+  --exclude-module PySide6.QtWebEngineCore ^
+  --exclude-module PySide6.QtMultimedia ^
+  --exclude-module PySide6.QtNetwork ^
+  --exclude-module PySide6.QtSql ^
+  --exclude-module PySide6.QtQml ^
+  --exclude-module PySide6.QtQuick ^
+  --exclude-module PySide6.QtPdf ^
+  --exclude-module PySide6.QtBluetooth ^
+  --exclude-module PySide6.QtSerialPort ^
+  --exclude-module PySide6.QtPositioning ^
+  --exclude-module PySide6.QtSensors ^
+  --exclude-module PySide6.QtTest ^
+  --exclude-module PySide6.QtDesigner ^
+  --exclude-module PySide6.QtHelp ^
+  main.py
+  ```
 
 <br>
 <br>

@@ -1,12 +1,24 @@
 import sys
 import random
 import signal
+import os
 from datetime import datetime
 from PySide6.QtCore import Qt, QTimer, QRect, QPoint
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton, QWidget, QVBoxLayout
 from PySide6.QtGui import QPixmap, QTransform
 
 _FLIP_TRANSFORM = QTransform().scale(-1, 1)  # 재사용할 좌우 반전 변환
+
+
+def resource_path(relative_path):
+    """ PyInstaller 빌드 환경과 일반 개발 환경(VS Code)의 경로를 모두 지원하는 함수 """
+    try:
+        # PyInstaller가 실행 시 임시로 압축을 푸는 내부 디렉터리 경로
+        base_path = sys._MEIPASS
+    except Exception:
+        # VS Code 등 일반 파이썬 실행 환경일 때의 현재 경로
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 
 class DesktopPet(QMainWindow):
@@ -34,7 +46,7 @@ class DesktopPet(QMainWindow):
             "lay_down": 5000
         }
 
-        self.move_speed = 3
+        self.move_speed = 1
         self.move_interval_ms = 50  # walk일 때만 도는 이동 타이머 주기
 
         self.direction_x = random.choice([-1, 1])
@@ -67,7 +79,7 @@ class DesktopPet(QMainWindow):
         start_y = random.randint(0, self.screen_height - self.display_size)
         self.move(start_x, start_y)
         
-        self.full_sprite_sheet = QPixmap("assets/sprites.png")
+        self.full_sprite_sheet = QPixmap(resource_path("assets/sprites.png"))
 
         if self.full_sprite_sheet.isNull():
             print("오류: 이미지를 불러올 수 없습니다. 프로그램을 종료합니다.", file=sys.stderr)
@@ -127,7 +139,6 @@ class DesktopPet(QMainWindow):
         self.popup.setLayout(layout)
 
     def _get_processed_frame(self, frame_index, direction_x):
-        # 캐시에 없는 조합만 자르기/뒤집기/스케일하고 캐시에 저장
         key = (frame_index, direction_x)
         cached = self._frame_cache.get(key)
         if cached is not None:
@@ -155,7 +166,7 @@ class DesktopPet(QMainWindow):
     def update_pet_image(self):
         key = (self.current_frame, self.direction_x)
         if key == self._last_drawn_key:
-            return  # 같은 프레임이면 다시 안 그림
+            return  
 
         pixmap = self._get_processed_frame(self.current_frame, self.direction_x)
         self.pet_label.setPixmap(pixmap)
@@ -163,7 +174,7 @@ class DesktopPet(QMainWindow):
 
     def next_frame(self):
         if self.start_frame == self.end_frame:
-            self.current_frame = self.start_frame  # 프레임 1개뿐이면 난수 생략
+            self.current_frame = self.start_frame  
         else:
             self.current_frame = random.randint(self.start_frame, self.end_frame)
 
@@ -195,7 +206,6 @@ class DesktopPet(QMainWindow):
             self.move(next_x, next_y)
 
     def _pick_action(self, options):
-        # random.choice와 동일하되 'lay_down'만 LAY_DOWN_WEIGHT배 더 잘 뽑힘
         weights = [self.LAY_DOWN_WEIGHT if opt == "lay_down" else 1 for opt in options]
         return random.choices(options, weights=weights)[0]
 
@@ -236,7 +246,7 @@ class DesktopPet(QMainWindow):
             if not self._drag_active:
                 self._move_timer.start()
         else:
-            self._move_timer.stop()  # walk가 아니면 이동 타이머는 꺼둠
+            self._move_timer.stop()  
 
     def reset_action_duration(self):
         if self.current_action in ["rightRodao", "leftRodao", "stop"]:
@@ -277,7 +287,6 @@ class DesktopPet(QMainWindow):
 
 
 def _lower_process_priority():
-    # 백그라운드 앱이므로 OS에 낮은 우선순위로 스케줄링 요청 (실패해도 무시)
     try:
         import psutil
         p = psutil.Process()
