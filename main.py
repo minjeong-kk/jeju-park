@@ -6,13 +6,18 @@ from PySide6.QtCore import Qt, QTimer, QRect, QPoint
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton, QWidget, QVBoxLayout
 from PySide6.QtGui import QPixmap, QTransform
 
+_FLIP_TRANSFORM = QTransform().scale(-1, 1)  # 재사용할 좌우 반전 변환
+
+
 class DesktopPet(QMainWindow):
+    LAY_DOWN_WEIGHT = 3  # lay_down이 다른 행동보다 이 배수만큼 더 잘 뽑힘
+
     def __init__(self):
         super().__init__()
         
         self.cols = 3  
         self.rows = 4
-        
+
         self.actions = {
             "walk": (0, 2),         
             "rightRodao": (4, 4),    
@@ -20,16 +25,18 @@ class DesktopPet(QMainWindow):
             "stop": (5, 5),          
             "lay_down": (7, 9)   
         }
-        
+
         self.speeds = {
             "walk": 200,        
             "rightRodao": 500,
             "leftRodao": 500,
             "stop": 1500,
-            "lay_down": 1000
+            "lay_down": 5000
         }
-        
+
         self.move_speed = 3
+        self.move_interval_ms = 50  # walk일 때만 도는 이동 타이머 주기
+
         self.direction_x = random.choice([-1, 1])
         self.direction_y = random.choice([-1, 1])
         
@@ -61,35 +68,48 @@ class DesktopPet(QMainWindow):
         self.move(start_x, start_y)
         
         self.full_sprite_sheet = QPixmap("assets/sprites.png")
-        
-        if not self.full_sprite_sheet.isNull():
-            self.frame_width = self.full_sprite_sheet.width() // 3
-            self.frame_height = self.full_sprite_sheet.height() // 4
-        
+
+        if self.full_sprite_sheet.isNull():
+            print("오류: 이미지를 불러올 수 없습니다. 프로그램을 종료합니다.", file=sys.stderr)
+            sys.exit(1)
+
+        self.frame_width = self.full_sprite_sheet.width() // 3
+        self.frame_height = self.full_sprite_sheet.height() // 4
+
+        self._frame_cache = {}  # (프레임, 방향) -> 가공된 QPixmap 캐시
+        self._last_drawn_key = None
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.next_frame)
         self.timer.start(self.speeds[self.current_action])
 
         self._move_timer = QTimer(self)
-        self._move_timer.setInterval(16)
+        self._move_timer.setInterval(self.move_interval_ms)
         self._move_timer.timeout.connect(self._move_step)
-        self._move_timer.start()
-        
+        if self.current_action == "walk":
+            self._move_timer.start()
+
         self._drag_active = False
         self._drag_offset = QPoint()
 
-        # ✅ 커스텀 팝업 (투명 배경)
+        self.popup = None  # 우클릭 시 _ensure_popup에서 지연 생성
+
+        self.update_pet_image()
+
+    def _ensure_popup(self):
+        if self.popup is not None:
+            return
+
         self.popup = QWidget()
         self.popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         layout = QVBoxLayout(self.popup)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        quit_btn = QPushButton("❌")
+        quit_btn = QPushButton("X")
         quit_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                border: 1px solid #888888;
                 width: 14px;
                 height: 14px;
                 color: white;
@@ -101,40 +121,56 @@ class DesktopPet(QMainWindow):
                 background-color: rgba(255, 255, 255, 30);
             }
         """)
+
         quit_btn.clicked.connect(QApplication.quit)
         layout.addWidget(quit_btn)
         self.popup.setLayout(layout)
-        
-        self.update_pet_image()
 
-    def update_pet_image(self):
-        if self.full_sprite_sheet.isNull():
-            self.pet_label.setText("이미지를 찾을 수 없습니다.")
-            return
+    def _get_processed_frame(self, frame_index, direction_x):
+        # 캐시에 없는 조합만 자르기/뒤집기/스케일하고 캐시에 저장
+        key = (frame_index, direction_x)
+        cached = self._frame_cache.get(key)
+        if cached is not None:
+            return cached
 
-        row = self.current_frame // self.cols
-        col = self.current_frame % self.cols
-        
+        row = frame_index // self.cols
+        col = frame_index % self.cols
+
         cropped_pixmap = self.full_sprite_sheet.copy(
             QRect(col * self.frame_width, row * self.frame_height, self.frame_width, self.frame_height)
         )
-        
-        if self.direction_x == -1:
-            cropped_pixmap = cropped_pixmap.transformed(QTransform().scale(-1, 1))
-        
-        self.pet_label.setPixmap(cropped_pixmap.scaled(
-            self.display_size, self.display_size, 
+
+        if direction_x == -1:
+            cropped_pixmap = cropped_pixmap.transformed(_FLIP_TRANSFORM)
+
+        scaled_pixmap = cropped_pixmap.scaled(
+            self.display_size, self.display_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.FastTransformation
-        ))
+        )
+
+        self._frame_cache[key] = scaled_pixmap
+        return scaled_pixmap
+
+    def update_pet_image(self):
+        key = (self.current_frame, self.direction_x)
+        if key == self._last_drawn_key:
+            return  # 같은 프레임이면 다시 안 그림
+
+        pixmap = self._get_processed_frame(self.current_frame, self.direction_x)
+        self.pet_label.setPixmap(pixmap)
+        self._last_drawn_key = key
 
     def next_frame(self):
-        self.current_frame = random.randint(self.start_frame, self.end_frame)
-        
+        if self.start_frame == self.end_frame:
+            self.current_frame = self.start_frame  # 프레임 1개뿐이면 난수 생략
+        else:
+            self.current_frame = random.randint(self.start_frame, self.end_frame)
+
         self.action_duration -= 1
         if self.action_duration <= 0:
             self.switch_action()
-            
+
         self.update_pet_image()
 
     def _move_step(self):
@@ -158,45 +194,55 @@ class DesktopPet(QMainWindow):
 
             self.move(next_x, next_y)
 
+    def _pick_action(self, options):
+        # random.choice와 동일하되 'lay_down'만 LAY_DOWN_WEIGHT배 더 잘 뽑힘
+        weights = [self.LAY_DOWN_WEIGHT if opt == "lay_down" else 1 for opt in options]
+        return random.choices(options, weights=weights)[0]
+
     def switch_action(self):
         old_action = self.current_action
         hour = datetime.now().hour
         is_night = 22 <= hour or hour < 6
-        
+
         if old_action in ["rightRodao", "leftRodao"]:
             self.current_action = random.choice(["walk", "stop"])
         elif old_action == "stop":
             if is_night:
-                self.current_action = random.choice(["lay_down", "stop", "walk"])
+                self.current_action = self._pick_action(["lay_down", "stop", "walk"])
             else:
-                self.current_action = random.choice(["walk", "rightRodao", "leftRodao", "lay_down"])
+                self.current_action = self._pick_action(["walk", "rightRodao", "leftRodao", "lay_down"])
         elif old_action == "walk":
             if is_night:
-                self.current_action = random.choice(["stop", "lay_down"])
+                self.current_action = self._pick_action(["stop", "lay_down"])
             else:
                 if self.direction_x == 1:
-                    self.current_action = random.choice(["rightRodao", "lay_down", "stop"])
+                    self.current_action = self._pick_action(["rightRodao", "lay_down", "stop"])
                 else:
-                    self.current_action = random.choice(["leftRodao", "lay_down", "stop"])
+                    self.current_action = self._pick_action(["leftRodao", "lay_down", "stop"])
         elif old_action == "lay_down":
             if is_night:
-                self.current_action = random.choice(["lay_down", "stop"])
+                self.current_action = self._pick_action(["lay_down", "stop"])
             else:
                 self.current_action = random.choice(["walk", "stop"])
-            
+
         self.start_frame, self.end_frame = self.actions[self.current_action]
         self.current_frame = self.start_frame
         self.reset_action_duration()
         self.timer.setInterval(self.speeds[self.current_action])
+
         if self.current_action == "walk":
             self.direction_x = random.choice([-1, 1])
             self.direction_y = random.choice([-1, 1])
+            if not self._drag_active:
+                self._move_timer.start()
+        else:
+            self._move_timer.stop()  # walk가 아니면 이동 타이머는 꺼둠
 
     def reset_action_duration(self):
         if self.current_action in ["rightRodao", "leftRodao", "stop"]:
-            self.action_duration = random.randint(1, 1) 
+            self.action_duration = random.randint(1, 1)
         elif self.current_action == "lay_down":
-            self.action_duration = random.randint(5, 10)
+            self.action_duration = random.randint(15, 30)
         else:
             self.action_duration = random.randint(15, 25)
 
@@ -208,6 +254,7 @@ class DesktopPet(QMainWindow):
             self._drag_offset = event.globalPosition().toPoint() - self.pos()
             event.accept()
         elif event.button() == Qt.MouseButton.RightButton:
+            self._ensure_popup()
             self.popup.move(event.globalPosition().toPoint())
             self.popup.show()
             event.accept()
@@ -221,14 +268,36 @@ class DesktopPet(QMainWindow):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_active = False
             self.timer.start(self.speeds[self.current_action])
-            self._move_timer.start()
+            if self.current_action == "walk":
+                self._move_timer.start()
             event.accept()
 
     def nativeEvent(self, eventType, message):
         return False, 0
 
+
+def _lower_process_priority():
+    # 백그라운드 앱이므로 OS에 낮은 우선순위로 스케줄링 요청 (실패해도 무시)
+    try:
+        import psutil
+        p = psutil.Process()
+        if sys.platform == "win32":
+            p.nice(psutil.IDLE_PRIORITY_CLASS)
+        else:
+            p.nice(10)
+    except ImportError:
+        print(
+            "psutil이 설치되어 있지 않아 프로세스 우선순위를 낮추지 못했습니다 "
+            "(선택 사항이며, 실행에는 문제 없음. 'pip install psutil'로 설치 가능).",
+            file=sys.stderr,
+        )
+    except Exception as e:
+        print(f"프로세스 우선순위 설정 실패 (무시하고 계속 진행): {e}", file=sys.stderr)
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+    _lower_process_priority()
     app = QApplication(sys.argv)
     pet = DesktopPet()
     pet.show()
